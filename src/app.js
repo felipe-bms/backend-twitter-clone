@@ -1,12 +1,14 @@
 const express = require("express");
-const { MongoClient } = require("mongodb");
+const { MongoClient, ObjectId } = require("mongodb");
 const dotenv = require("dotenv");
+const cors = require("cors");
 const Joi = require("joi");
 
-// Carrega as variáveis de ambiente do arquivo .env
 dotenv.config();
 
 const app = express();
+
+app.use(cors());
 app.use(express.json());
 
 let db;
@@ -32,6 +34,15 @@ const connectDB = async () => {
     process.exit(1); // Encerra o processo se a conexão falhar
   }
 };
+
+connectDB()
+  .then(() => {
+    const PORT = process.env.PORT || 5000;
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  })
+  .catch((err) => console.error("Failed to connect to database", err));
 
 // Schemas de validação com Joi
 
@@ -128,11 +139,74 @@ app.get("/tweets", async (req, res) => {
   }
 });
 
-connectDB()
-  .then(() => {
-    const PORT = process.env.PORT || 5000;
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-    });
-  })
-  .catch((err) => console.error("Failed to connect to database", err));
+// Rota PUT /tweets/:id para atualizar um tweet existente
+app.put("/tweets/:id", async (req, res) => {
+  try {
+    const { error } = tweetSchema.validate(req.body);
+
+    if (error) {
+      return res.status(422).send(error.details[0].message);
+    }
+
+    const { id } = req.params;
+    const { username, tweet } = req.body;
+
+    // Converte o id para ObjectId diretamente
+    const objectId = new ObjectId(id);
+
+    // Verifica se o tweet existe
+    const existingTweet = await tweetsCollection.findOne({ _id: objectId });
+
+    if (!existingTweet) {
+      return res.status(404).send("Tweet não encontrado");
+    }
+
+    // Verifica se o username do tweet original corresponde ao username fornecido
+    if (existingTweet.username !== username) {
+      return res
+        .status(403)
+        .send(
+          "Ação não permitida: o username não corresponde ao tweet original"
+        );
+    }
+
+    // Atualiza o tweet na coleção
+    const result = await tweetsCollection.updateOne(
+      { _id: objectId },
+      { $set: { tweet } } // Aqui só o tweet é atualizado
+    );
+
+    // Verifica se algum documento foi modificado
+    if (result.modifiedCount === 0) {
+      return res.status(304).send("Nenhuma modificação feita");
+    }
+
+    res.status(204).send(); // Retorna 204 No Content em caso de sucesso
+  } catch (err) {
+    res.status(404).send("Este tweet não foi encontrado.");
+  }
+});
+
+// Rota DELETE /tweets/:id para deletar um tweet existente
+app.delete("/tweets/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Converte o id para ObjectId diretamente
+    const objectId = new ObjectId(id);
+
+    // Verifica se o tweet existe
+    const existingTweet = await tweetsCollection.findOne({ _id: objectId });
+
+    if (!existingTweet) {
+      return res.status(404).send("Tweet não encontrado");
+    }
+
+    // Remove o tweet da coleção
+    await tweetsCollection.deleteOne({ _id: objectId });
+
+    res.status(204).send(); // Retorna 204 No Content em caso de sucesso
+  } catch (err) {
+    res.status(404).send("Tweet não encontrado");
+  }
+});
